@@ -1,0 +1,176 @@
+import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Location Aggregator',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: const LocationPage(),
+    );
+  }
+}
+
+class LocationPage extends StatefulWidget {
+  const LocationPage({super.key});
+
+  @override
+  _LocationPageState createState() => _LocationPageState();
+}
+
+class _LocationPageState extends State<LocationPage> {
+  List<Position> positions = [];
+  Position? aggregatedPosition;
+  String apiResponse = '';
+
+  Future<void> _getLocation() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      setState(() {
+        apiResponse = 'Location services are disabled.';
+      });
+      return;
+    }
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        setState(() {
+          apiResponse = 'Location permissions are denied.';
+        });
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      setState(() {
+        apiResponse = 'Location permissions are permanently denied.';
+      });
+      return;
+    }
+
+    Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high);
+
+    setState(() {
+      if (positions.length < 3) {
+        positions.add(position);
+      }
+      if (positions.length == 3) {
+        _computeAggregatedPosition();
+      }
+    });
+  }
+
+  void _computeAggregatedPosition() {
+    if (positions.length != 3) return;
+
+    double totalWeight = 0;
+    for (var pos in positions) {
+      totalWeight += 1 / pos.accuracy;
+    }
+
+    double lat = 0, lon = 0, alt = 0;
+    for (var pos in positions) {
+      double weight = (1 / pos.accuracy) / totalWeight;
+      lat += pos.latitude * weight;
+      lon += pos.longitude * weight;
+      alt += pos.altitude * weight;
+    }
+
+    aggregatedPosition = Position(
+      latitude: lat,
+      longitude: lon,
+      timestamp: DateTime.now(),
+      accuracy: 0, // Not used
+      altitude: alt,
+      heading: 0,
+      speed: 0,
+      speedAccuracy: 0,
+    );
+  }
+
+  Future<void> _sendToAPI() async {
+    if (aggregatedPosition == null) return;
+
+    final url = Uri.parse('https://api.example.com/location'); // Replace with actual API
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'latitude': aggregatedPosition!.latitude,
+        'longitude': aggregatedPosition!.longitude,
+        'altitude': aggregatedPosition!.altitude,
+      }),
+    );
+
+    setState(() {
+      apiResponse = 'Response: ${response.body}';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Location Aggregator'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            ElevatedButton(
+              onPressed: positions.length < 3 ? _getLocation : null,
+              child: Text('Get Location (${positions.length}/3)'),
+            ),
+            const SizedBox(height: 20),
+            if (positions.isNotEmpty)
+              Expanded(
+                child: ListView.builder(
+                  itemCount: positions.length,
+                  itemBuilder: (context, index) {
+                    final pos = positions[index];
+                    return ListTile(
+                      title: Text('Point ${index + 1}'),
+                      subtitle: Text(
+                          'Lat: ${pos.latitude}, Lon: ${pos.longitude}, Alt: ${pos.altitude}, Acc: ${pos.accuracy}'),
+                    );
+                  },
+                ),
+              ),
+            if (aggregatedPosition != null)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Text(
+                      'Aggregated: Lat: ${aggregatedPosition!.latitude}, Lon: ${aggregatedPosition!.longitude}, Alt: ${aggregatedPosition!.altitude}'),
+                ),
+              ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: aggregatedPosition != null ? _sendToAPI : null,
+              child: const Text('Send to API'),
+            ),
+            const SizedBox(height: 20),
+            Text(apiResponse),
+          ],
+        ),
+      ),
+    );
+  }
+}
