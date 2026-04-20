@@ -96,7 +96,6 @@ Workflow:
 - Accuracy
 - Confusion Matrix
 - F1-score (macro/micro)
-- Log-loss (if probabilistic models used)
 
 ---
 
@@ -105,9 +104,8 @@ Workflow:
 - Python
 - Scikit-learn
 - Pandas / NumPy
-- TensorFlow / PyTorch (optional)
 - Django (backend API)
-- Android (mobile app)
+- Flutter (mobile app)
 - Geospatial data processing
 
 ---
@@ -133,12 +131,3 @@ Processing:
 Output:
 - Amphitheater: B  
 - Position: Zone 3
-
----
-
-## 🔮 Future Improvements
-
-- Real-time tracking system
-- Map visualization (heatmaps)
-- Improved deep learning geospatial models
-- Better indoor/outdoor separation
