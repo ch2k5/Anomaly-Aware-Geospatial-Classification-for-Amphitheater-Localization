@@ -91,3 +91,4 @@ urllib3==2.6.3
 wcwidth==0.5.2
 webencodings==0.5.1
 widgetsnbextension==4.0.15
+gunicorn==21.2.0
