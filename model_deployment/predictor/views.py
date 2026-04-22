@@ -7,22 +7,36 @@ from rest_framework.decorators import api_view
 
 
 MODEL_PATH = Path(__file__).resolve().parent.parent / "model.joblib"
+model = None
+model_load_error = None
 
-try:
-    model = joblib.load(MODEL_PATH)
-    model_load_error = None
-except Exception as exc:
-    model = None
-    model_load_error = str(exc)
+
+def get_model():
+    global model, model_load_error
+
+    if model is not None:
+        return model
+
+    if model_load_error is not None:
+        raise RuntimeError(model_load_error)
+
+    try:
+        model = joblib.load(MODEL_PATH)
+        return model
+    except Exception as exc:
+        model_load_error = str(exc)
+        raise RuntimeError(model_load_error) from exc
 
 
 @api_view(["POST"])
 def predict(request):
-    if model is None:
+    try:
+        loaded_model = get_model()
+    except RuntimeError as exc:
         return JsonResponse(
             {
                 "error": "Model could not be loaded.",
-                "details": model_load_error,
+                "details": str(exc),
                 "path": str(MODEL_PATH),
             },
             status=500,
@@ -46,7 +60,7 @@ def predict(request):
 
     try:
         features = np.array([[lat, longitude, accuracy, alt]])
-        prediction = model.predict(features)
+        prediction = loaded_model.predict(features)
         amphi = int(prediction[0][0])
         position = int(prediction[0][1])
 
