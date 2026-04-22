@@ -1,36 +1,55 @@
+from pathlib import Path
+
 import joblib
 import numpy as np
 from django.http import JsonResponse
 from rest_framework.decorators import api_view
 
 
-model = joblib.load('model_deployment/model.joblib')
+MODEL_PATH = Path(__file__).resolve().parent.parent / "model.joblib"
 
-@api_view(['POST'])
+try:
+    model = joblib.load(MODEL_PATH)
+    model_load_error = None
+except Exception as exc:
+    model = None
+    model_load_error = str(exc)
+
+
+@api_view(["POST"])
 def predict(request):
+    if model is None:
+        return JsonResponse(
+            {
+                "error": "Model could not be loaded.",
+                "details": model_load_error,
+                "path": str(MODEL_PATH),
+            },
+            status=500,
+        )
+
     try:
-        lat  = float(request.data.get('lat'))
-        long = float(request.data.get('long'))
-        alt  = float(request.data.get('alt'))
-        accuracy = float(request.data.get('accuracy'))
+        lat = float(request.data["lat"])
+        longitude = float(request.data["long"])
+        alt = float(request.data["alt"])
+        accuracy = float(request.data["accuracy"])
+    except KeyError as exc:
+        return JsonResponse(
+            {"error": f"Missing required field: {exc.args[0]}"},
+            status=400,
+        )
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"error": "lat, long, alt, and accuracy must be valid numbers."},
+            status=400,
+        )
 
-        # Prepare input (same order as training!)
-        features = np.array([[lat, long, accuracy, alt]])
-
-        # Prediction
+    try:
+        features = np.array([[lat, longitude, accuracy, alt]])
         prediction = model.predict(features)
-
-        # If your model returns multiple outputs:
-        # prediction[0] → [amphi, position]
         amphi = int(prediction[0][0])
         position = int(prediction[0][1])
 
-        return JsonResponse({
-            'amphi': amphi,
-            'position': position
-        })
-
-    except Exception as e:
-        return JsonResponse({
-            'error': str(e)
-        }, status=400)
+        return JsonResponse({"amphi": amphi, "position": position})
+    except Exception as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
