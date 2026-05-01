@@ -1,19 +1,52 @@
-import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
-import 'dart:math';
 import 'dart:convert';
 
-class ApiResponse {
-  final String prediction;
-  final double confidence;
+import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 
-  ApiResponse({required this.prediction, required this.confidence});
+const hostIp = "10.246.247.102";
 
-  factory ApiResponse.fromJson(Map<String, dynamic> json) {
-    return ApiResponse(
-      prediction: json['prediction'] as String,
-      confidence: (json['confidence'] as num).toDouble(),
+const String _modelPredictionUrl =
+    'http://$hostIp:8000/model_prediction/predict/';
+
+class ModelPredictionRequest {
+  final double lat;
+  final double long;
+  final double alt;
+  final double accuracy;
+
+  ModelPredictionRequest({
+    required this.lat,
+    required this.long,
+    required this.alt,
+    required this.accuracy,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {'lat': lat, 'long': long, 'alt': alt, 'accuracy': accuracy};
+  }
+}
+
+class ModelPredictionResponse {
+  final int amphi;
+  final int position;
+
+  ModelPredictionResponse({required this.amphi, required this.position});
+
+  factory ModelPredictionResponse.fromJson(Map<String, dynamic> json) {
+    return ModelPredictionResponse(
+      amphi: (json['amphi'] as num).toInt(),
+      position: (json['position'] as num).toInt(),
     );
+  }
+
+  bool get isAnomaly => amphi == -1 && position == -1;
+
+  String get label {
+    if (isAnomaly) {
+      return 'Outside / anomaly detected';
+    }
+    return 'Amphitheater $amphi';
   }
 }
 
@@ -44,39 +77,61 @@ class LocationPage extends StatefulWidget {
   const LocationPage({super.key});
 
   @override
-  _LocationPageState createState() => _LocationPageState();
+  State<LocationPage> createState() => _LocationPageState();
 }
 
 class _LocationPageState extends State<LocationPage> {
   Position? aggregatedPosition;
-  ApiResponse? apiResponse;
+  ModelPredictionResponse? apiResponse;
+  String? errorMessage;
   bool isLoading = false;
+
+  Future<ModelPredictionResponse> _sendPrediction(Position position) async {
+    final request = ModelPredictionRequest(
+      lat: position.latitude,
+      long: position.longitude,
+      alt: position.altitude,
+      accuracy: position.accuracy,
+    );
+
+    final uri = Uri.parse(_modelPredictionUrl);
+    final response = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(request.toJson()),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Backend returned status ${response.statusCode}');
+    }
+
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return ModelPredictionResponse.fromJson(body);
+  }
 
   Future<void> _collectAndSendLocation() async {
     setState(() {
       isLoading = true;
       apiResponse = null;
+      errorMessage = null;
     });
 
-    bool serviceEnabled;
-    LocationPermission permission;
-
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       setState(() {
         isLoading = false;
-        apiResponse = null;
+        errorMessage = 'Location services are disabled.';
       });
       return;
     }
 
-    permission = await Geolocator.checkPermission();
+    LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
         setState(() {
           isLoading = false;
-          apiResponse = null;
+          errorMessage = 'Location permission was denied.';
         });
         return;
       }
@@ -85,57 +140,71 @@ class _LocationPageState extends State<LocationPage> {
     if (permission == LocationPermission.deniedForever) {
       setState(() {
         isLoading = false;
-        apiResponse = null;
+        errorMessage = 'Location permission is permanently denied.';
       });
       return;
     }
 
-    List<Position> positions = [];
+    final positions = <Position>[];
     for (int i = 0; i < 3; i++) {
-      Position position = await Geolocator.getCurrentPosition(
-        locationSettings: LocationSettings(accuracy: LocationAccuracy.high),
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
       positions.add(position);
     }
 
-    // Compute aggregated position
+    final aggregated = _aggregatePositions(positions);
+    aggregatedPosition = aggregated;
+
+    try {
+      final response = await _sendPrediction(aggregated);
+      setState(() {
+        apiResponse = response;
+        isLoading = false;
+      });
+    } catch (error) {
+      setState(() {
+        errorMessage = 'Failed to send location: $error';
+        isLoading = false;
+      });
+    }
+  }
+
+  Position _aggregatePositions(List<Position> positions) {
     double totalWeight = 0;
-    for (var pos in positions) {
-      totalWeight += 1 / pos.accuracy;
+    double weightedLat = 0;
+    double weightedLon = 0;
+    double weightedAlt = 0;
+    double accuracySum = 0;
+
+    for (final pos in positions) {
+      final weight = pos.accuracy > 0 ? 1 / pos.accuracy : 1.0;
+      totalWeight += weight;
+      weightedLat += pos.latitude * weight;
+      weightedLon += pos.longitude * weight;
+      weightedAlt += pos.altitude * weight;
+      accuracySum += pos.accuracy;
     }
 
-    double lat = 0, lon = 0, alt = 0;
-    for (var pos in positions) {
-      double weight = (1 / pos.accuracy) / totalWeight;
-      lat += pos.latitude * weight;
-      lon += pos.longitude * weight;
-      alt += pos.altitude * weight;
-    }
+    final averageAccuracy = accuracySum / positions.length;
+    final normalizedTotalWeight = totalWeight > 0
+        ? totalWeight
+        : positions.length.toDouble();
 
-    aggregatedPosition = Position(
-      latitude: lat,
-      longitude: lon,
+    return Position(
+      latitude: weightedLat / normalizedTotalWeight,
+      longitude: weightedLon / normalizedTotalWeight,
       timestamp: DateTime.now(),
-      accuracy: 0, // Not used
-      altitude: alt,
+      accuracy: averageAccuracy,
+      altitude: weightedAlt / normalizedTotalWeight,
       heading: 0,
       speed: 0,
       speedAccuracy: 0,
       altitudeAccuracy: 0,
       headingAccuracy: 0,
     );
-
-    // Mock API response
-    await Future.delayed(const Duration(seconds: 2)); // Simulate network delay
-    final random = Random();
-    final mockResult = random.nextBool() ? 'amphix' : 'out';
-    final mockResponseJson =
-        '{"prediction": "$mockResult", "confidence": ${(random.nextDouble() * 0.5 + 0.5).toStringAsFixed(2)}}';
-
-    setState(() {
-      isLoading = false;
-      apiResponse = ApiResponse.fromJson(jsonDecode(mockResponseJson));
-    });
   }
 
   @override
@@ -195,6 +264,16 @@ class _LocationPageState extends State<LocationPage> {
                   ),
                 ),
               ),
+            if (errorMessage != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 20),
+                child: Text(
+                  errorMessage!,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: Colors.red),
+                ),
+              ),
             if (apiResponse != null)
               Padding(
                 padding: const EdgeInsets.only(top: 20),
@@ -208,9 +287,9 @@ class _LocationPageState extends State<LocationPage> {
                         Row(
                           children: [
                             Icon(
-                              apiResponse!.prediction == 'amphix'
-                                  ? Icons.theater_comedy
-                                  : Icons.outdoor_grill,
+                              apiResponse!.isAnomaly
+                                  ? Icons.warning
+                                  : Icons.theater_comedy,
                               size: 32,
                               color: Theme.of(context).colorScheme.primary,
                             ),
@@ -220,21 +299,26 @@ class _LocationPageState extends State<LocationPage> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    apiResponse!.prediction == 'amphix'
-                                        ? 'Amphitheater'
-                                        : 'Outside',
+                                    apiResponse!.label,
                                     style: Theme.of(
                                       context,
                                     ).textTheme.headlineSmall,
                                   ),
                                   const SizedBox(height: 8),
-                                  Text(
-                                    'Confidence: ${(apiResponse!.confidence * 100).toStringAsFixed(1)}%',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodyMedium,
-                                  ),
-                                  const SizedBox(height: 8),
+                                  if (!apiResponse!.isAnomaly)
+                                    Text(
+                                      'Predicted position: ${apiResponse!.position}',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodyMedium,
+                                    ),
+                                  if (apiResponse!.isAnomaly)
+                                    Text(
+                                      'The backend marked this point as an anomaly.',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodyMedium,
+                                    ),
                                 ],
                               ),
                             ),
