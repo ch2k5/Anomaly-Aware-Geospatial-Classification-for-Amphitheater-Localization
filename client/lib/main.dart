@@ -186,7 +186,7 @@ class _LocationPageState extends State<LocationPage> {
       });
     } catch (error) {
       setState(() {
-        errorMessage = 'Failed to send location: $error';
+        errorMessage = 'We could not find your amphitheater right now.';
         isLoading = false;
       });
     }
@@ -294,7 +294,7 @@ class _LocationPageState extends State<LocationPage> {
                                 ),
                                 const SizedBox(height: 6),
                                 Text(
-                                  'The app will read your location three times, average the readings, and ask the model for the nearest amphitheater.',
+                                  'Tap the button and we will use your current location to find the nearest amphitheater.',
                                   style: theme.textTheme.bodyMedium?.copyWith(
                                     color: colorScheme.onSurfaceVariant,
                                     height: 1.45,
@@ -331,9 +331,8 @@ class _LocationPageState extends State<LocationPage> {
                   padding: EdgeInsets.only(top: 18),
                   child: _StatusPanel(
                     icon: Icons.sensors,
-                    title: 'Collecting precise location',
-                    message:
-                        'Keep the app open while the readings are captured.',
+                    title: 'Finding your location',
+                    message: 'Keep the app open for a moment.',
                   ),
                 ),
               if (errorMessage != null)
@@ -341,7 +340,7 @@ class _LocationPageState extends State<LocationPage> {
                   padding: const EdgeInsets.only(top: 18),
                   child: _StatusPanel(
                     icon: Icons.error_outline,
-                    title: 'Location request failed',
+                    title: 'Could not find your location',
                     message: errorMessage!,
                     isError: true,
                   ),
@@ -493,7 +492,7 @@ class _PredictionPanel extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       isAnomaly
-                          ? 'The backend marked this reading as an anomaly.'
+                          ? 'This location does not match a known amphitheater.'
                           : 'Predicted position: ${response.position}',
                       style: theme.textTheme.bodyLarge?.copyWith(
                         color: colorScheme.onSurfaceVariant,
