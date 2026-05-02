@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
-const hostIp = "10.246.247.102";
+const hostIp = "192.168.100.4";
 
 const String _modelPredictionUrl =
     'http://$hostIp:8000/model_prediction/predict/';
@@ -44,7 +44,7 @@ class ModelPredictionResponse {
 
   String get label {
     if (isAnomaly) {
-      return 'Outside / anomaly detected';
+      return 'Outside expected area';
     }
     return 'Amphitheater $amphi';
   }
@@ -61,11 +61,31 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Location Collector',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
+          seedColor: const Color(0xFF7C3AED),
           brightness: Brightness.light,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFFAF7FF),
+        appBarTheme: const AppBarTheme(
+          centerTitle: false,
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          foregroundColor: Color(0xFF2E1065),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            minimumSize: const Size(double.infinity, 52),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ),
       ),
       home: const LocationPage(),
@@ -209,128 +229,283 @@ class _LocationPageState extends State<LocationPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Location Collector'), elevation: 0),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Card(
-              elevation: 4,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
+      appBar: AppBar(
+        title: const Text(
+          'Amphitheater Locator',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colorScheme.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: colorScheme.outlineVariant),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 18,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              color: colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.my_location,
+                              color: colorScheme.onPrimaryContainer,
+                              size: 28,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Find your amphitheater',
+                                  style: theme.textTheme.headlineSmall
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w800,
+                                        color: colorScheme.onSurface,
+                                      ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'The app will read your location three times, average the readings, and ask the model for the nearest amphitheater.',
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                    height: 1.45,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 22),
+                      ElevatedButton.icon(
+                        onPressed: isLoading ? null : _collectAndSendLocation,
+                        icon: isLoading
+                            ? SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.4,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              )
+                            : const Icon(Icons.near_me),
+                        label: Text(
+                          isLoading ? 'Locating...' : 'Locate amphitheater',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (isLoading)
+                const Padding(
+                  padding: EdgeInsets.only(top: 18),
+                  child: _StatusPanel(
+                    icon: Icons.sensors,
+                    title: 'Collecting precise location',
+                    message:
+                        'Keep the app open while the readings are captured.',
+                  ),
+                ),
+              if (errorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 18),
+                  child: _StatusPanel(
+                    icon: Icons.error_outline,
+                    title: 'Location request failed',
+                    message: errorMessage!,
+                    isError: true,
+                  ),
+                ),
+              if (apiResponse != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 18),
+                  child: _PredictionPanel(response: apiResponse!),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusPanel extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String message;
+  final bool isError;
+
+  const _StatusPanel({
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.isError = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final backgroundColor = isError
+        ? colorScheme.errorContainer
+        : const Color(0xFFF3E8FF);
+    final foregroundColor = isError
+        ? colorScheme.onErrorContainer
+        : const Color(0xFF4C1D95);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isError
+              ? colorScheme.error.withValues(alpha: 0.22)
+              : const Color(0xFFC084FC),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: foregroundColor, size: 26),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: foregroundColor,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  message,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: foregroundColor,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PredictionPanel extends StatelessWidget {
+  final ModelPredictionResponse response;
+
+  const _PredictionPanel({required this.response});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isAnomaly = response.isAnomaly;
+    final accentColor = isAnomaly
+        ? const Color(0xFF9333EA)
+        : const Color(0xFF6D28D9);
+    final backgroundColor = isAnomaly
+        ? const Color(0xFFF5EDFF)
+        : const Color(0xFFF1E9FF);
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: accentColor.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: colorScheme.surface,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  isAnomaly ? Icons.warning_amber : Icons.theater_comedy,
+                  color: accentColor,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      Icons.location_on,
-                      size: 48,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                    const SizedBox(height: 16),
                     Text(
-                      'Collect Location Data',
-                      style: Theme.of(context).textTheme.headlineSmall,
+                      isAnomaly ? 'Model result' : 'Predicted location',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: accentColor,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 4),
                     Text(
-                      'Tap the button to collect your location and send it to the model.',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                      textAlign: TextAlign.center,
+                      response.label,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                    const SizedBox(height: 16),
-                    ElevatedButton.icon(
-                      onPressed: isLoading ? null : _collectAndSendLocation,
-                      icon: const Icon(Icons.location_searching),
-                      label: const Text('Collect & Send Location'),
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 48),
+                    const SizedBox(height: 6),
+                    Text(
+                      isAnomaly
+                          ? 'The backend marked this reading as an anomaly.'
+                          : 'Predicted position: ${response.position}',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        height: 1.35,
                       ),
                     ),
                   ],
                 ),
               ),
-            ),
-            if (isLoading)
-              const Padding(
-                padding: EdgeInsets.only(top: 20),
-                child: Center(
-                  child: Column(
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Collecting location data...'),
-                    ],
-                  ),
-                ),
-              ),
-            if (errorMessage != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 20),
-                child: Text(
-                  errorMessage!,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(color: Colors.red),
-                ),
-              ),
-            if (apiResponse != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 20),
-                child: Card(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              apiResponse!.isAnomaly
-                                  ? Icons.warning
-                                  : Icons.theater_comedy,
-                              size: 32,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    apiResponse!.label,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.headlineSmall,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  if (!apiResponse!.isAnomaly)
-                                    Text(
-                                      'Predicted position: ${apiResponse!.position}',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodyMedium,
-                                    ),
-                                  if (apiResponse!.isAnomaly)
-                                    Text(
-                                      'The backend marked this point as an anomaly.',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodyMedium,
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ),
     );
   }
