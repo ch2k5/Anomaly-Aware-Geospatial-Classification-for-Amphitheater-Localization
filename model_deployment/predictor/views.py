@@ -97,19 +97,18 @@ def predict(request):
         )
 
     try:
-        # Anomaly detection with numpy array
-        features_array = np.array([[lat, longitude, accuracy, alt]])
-        anomaly_prediction = anomaly_model.predict(features_array)
-        if anomaly_prediction.item() == -1:  # outside
-            return JsonResponse({"amphi": -1, "position": -1})  # type: ignore
-        
-        # Main model with DataFrame (for DistanceToCentroids transformer)
+        # Keep feature names/order consistent with the fitted sklearn models.
         features_df = pd.DataFrame({
             'Latitude': [lat],
             'Longitude': [longitude],
             'Accuracy_m': [accuracy],
             'Altitude_m': [alt]
         })
+
+        anomaly_prediction = anomaly_model.predict(features_df)
+        if anomaly_prediction.item() == -1:  # outside
+            return JsonResponse({"amphi": -1, "position": -1})  # type: ignore
+
         prediction = loaded_model.predict(features_df)
         amphi = int(prediction[0][0])
         position = int(prediction[0][1])
