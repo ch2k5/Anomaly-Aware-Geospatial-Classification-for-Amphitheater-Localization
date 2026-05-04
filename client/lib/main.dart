@@ -4,6 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
+// const hostIp = "192.168.100.4";
+
+// const String _modelPredictionUrl =
+//     'http://$hostIp:8000/model_prediction/predict/';
 
 const String _modelPredictionUrl =
     'https://anomaly-aware-geospatial-classification-kknf.onrender.com/model_prediction/predict/';
