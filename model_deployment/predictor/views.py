@@ -27,7 +27,7 @@ class DistanceToCentroids(BaseEstimator, TransformerMixin):
 
 
 MODEL_PATH1 = Path(__file__).resolve().parent.parent / "models" / "model_pipeline.pkl"
-MODEL_PATH2 = Path(__file__).resolve().parent.parent / "models" / "anomaly_detection_model.pkl"
+MODEL_PATH2 = Path(__file__).resolve().parent.parent / "models" / "anomaly_model.pkl"
 model = None
 anomaly_detection_model = None
 model_load_error = None
